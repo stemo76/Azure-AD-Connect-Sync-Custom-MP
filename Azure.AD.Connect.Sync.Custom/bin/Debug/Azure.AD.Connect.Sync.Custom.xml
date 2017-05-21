@@ -1,0 +1,749 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ManagementPack SchemaVersion="2.0" ContentReadable="true" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Manifest>
+    <Identity>
+      <ID>Azure.AD.Connect.Sync.Custom</ID>
+      <Version>1.0.0.44</Version>
+    </Identity>
+    <Name>Azure AD Connect Sync Custom</Name>
+    <References>
+      <Reference Alias="MSIL">
+        <ID>Microsoft.SystemCenter.InstanceGroup.Library</ID>
+        <Version>7.5.8501.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="SC">
+        <ID>Microsoft.SystemCenter.Library</ID>
+        <Version>7.0.8433.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="Windows">
+        <ID>Microsoft.Windows.Library</ID>
+        <Version>7.5.8501.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="Health">
+        <ID>System.Health.Library</ID>
+        <Version>7.0.8433.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="System">
+        <ID>System.Library</ID>
+        <Version>7.5.8501.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+    </References>
+  </Manifest>
+  <TypeDefinitions>
+    <EntityTypes>
+      <ClassTypes>
+        <ClassType ID="Azure.AD.Connect.Sync.Class" Base="Windows!Microsoft.Windows.ComputerRole" Accessibility="Public" Abstract="false" Hosted="true" Singleton="false"></ClassType>
+        <ClassType ID="Azure.AD.Connect.Sync.Group" Accessibility="Public" Base="MSIL!Microsoft.SystemCenter.InstanceGroup" Abstract="false" Hosted="false" Singleton="true" Extension="false"></ClassType>
+      </ClassTypes>
+    </EntityTypes>
+    <SecureReferences>
+      <SecureReference ID="Azure.ADConnect.Sync.PowerShell.RunAsProfile" Accessibility="Public" Context="System!System.Entity" />
+    </SecureReferences>
+    <ModuleTypes>
+      <WriteActionModuleType ID="Azure.AD.Connect.Sync.WriteActionModuleType" Accessibility="Internal" Batching="true">
+        <Configuration>
+          <xsd:element minOccurs="1" name="TimeoutSeconds" type="xsd:integer" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+          <xsd:element type="xsd:string" name="adTenant" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+          <xsd:element type="xsd:string" name="AADSyncUrl" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+        </Configuration>
+        <OverrideableParameters>
+          <OverrideableParameter ID="TimeoutSeconds" Selector="$Config/TimeoutSeconds$" ParameterType="int" />
+          <OverrideableParameter ID="adTenant" Selector="$Config/adTenant$" ParameterType="string" />
+          <OverrideableParameter ID="AADSyncUrl" Selector="$Config/AADSyncUrl$" ParameterType="string" />
+        </OverrideableParameters>
+        <ModuleImplementation>
+          <Composite>
+            <MemberModules>
+              <WriteAction ID="WA" TypeID="Windows!Microsoft.Windows.PowerShellWriteAction">
+                <ScriptName>AzureADConnectSync.ps1</ScriptName>
+                <ScriptBody><![CDATA[Param($adTenant, $AADSyncURL, $user, $pass)
+$api = new-object -comObject "MOM.ScriptAPI"
+
+$SCOMPowerShellKey = "HKLM:\SOFTWARE\Microsoft\System Center Operations Manager\12\Setup\Powershell\V2"
+$SCOMModulePath = Join-Path (Get-ItemProperty $SCOMPowerShellKey).InstallDirectory "OperationsManager"
+
+if (!(Get-Module OperationsManager))
+{
+	Import-module $SCOMModulePath
+}
+
+$ADAuthLib= "C:\Program Files (x86)\Microsoft SDKs\Azure\PowerShell\ServiceManagement\Azure\ManagedCache\Microsoft.IdentityModel.Clients.ActiveDirectory.dll" 
+$ADAuthLibForms="C:\Program Files (x86)\Microsoft SDKs\Azure\PowerShell\ServiceManagement\Azure\ManagedCache\Microsoft.IdentityModel.Clients.ActiveDirectory.WindowsForms.dll"
+[System.Reflection.Assembly]::LoadFrom($ADAuthLib)
+[System.Reflection.Assembly]::LoadFrom($ADAuthLibForms)
+
+$AzurePSClientID = "1950a258-227b-4e31-a9cf-717495945fc2" 
+$AzureApiURI = "https://management.azure.com/"
+$Authority = "https://login.windows.net/common/$adTenant"
+$UserCreds = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.UserCredential" -ArgumentList @($user,(ConvertTo-SecureString -String $pass -AsPlainText -Force))
+$AuthContext = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext" -ArgumentList $Authority
+$AuthResult = $AuthContext.AcquireToken($AzureApiURI,$AzurePSClientID,$UserCreds)
+
+$RequestUri="https://management.azure.com/providers/Microsoft.ADHybridHealthService/services/$AADSyncUrl/servicemembers/?api-version=2014-01-01"
+$Rest =Invoke-RestMethod -Uri "$RequestUri" -Headers @{Authorization=$AuthResult.CreateAuthorizationHeader()} -ContentType "application/json" 
+$ServiceMemberID = $rest.Value | Select ServiceMemberID -ExpandProperty "ServiceMemberID"
+
+$RequestUri2="https://management.azure.com/providers//Microsoft.ADHybridHealthService/services/$AADSyncUrl/servicemembers/$ServiceMemberID/alerts/?state=Resolved&api-version=2014-01-01"
+$RestResolvedAlerts =Invoke-RestMethod -Uri "$RequestUri2" -Headers @{Authorization=$AuthResult.CreateAuthorizationHeader()} -ContentType "application/json" 
+$ResolvedValues=$RestResolvedAlerts.value
+
+$RequestUri3="https://management.azure.com/providers//Microsoft.ADHybridHealthService/services/$AADSyncUrl/servicemembers/$ServiceMemberID/alerts/?state=Active&api-version=2014-01-01"
+$RestActiveAlerts =Invoke-RestMethod -Uri "$RequestUri3" -Headers @{Authorization=$AuthResult.CreateAuthorizationHeader()} -ContentType "application/json" 
+$ActiveAlertValues=$RestActiveAlerts.value
+
+$ResolvedGuids=@()
+
+Foreach ($RValue in $ResolvedValues)
+{
+	$GUID= $RValue.alertId
+	$ResolvedGuids+=$GUID
+}
+
+
+$SCOMActiveAlerts= Get-SCOMAlert -Criteria "Name LIKE '%Azure AD Connect Sync - OpsConfig -%' AND ResolutionState = 0 AND IsMonitorAlert = 0"
+
+$ActiveSCOMAlertGUIDS=@()
+
+Foreach ($Alert in $SCOMActiveAlerts)
+{
+	$AzureADConnectLength =$alert.Description.Length-1
+	$AzIndex = $AzureADConnectLength-37
+	$AzSub = $alert.Description.Substring($AzIndex,36)
+	$ActiveSCOMAlertGUIDS+=$AzSub
+
+		If ($ResolvedGuids -contains $AzSub -Or $ResolvedGuids -match $AzSub)
+        {
+			$Alert | Resolve-SCOMAlert -comment "Azure AD Connect has automatically resolved this alert"	
+        } 
+}
+
+Foreach ($Value in $ActiveAlertValues)
+{
+	if ($AciveSCOMAlertGUIDS -contains $Value.alertId -Or $ActiveSCOMAlertGUIDS -match $Value.alertId)
+    {
+		break
+    }
+
+    else
+    {
+		$AlertName = $Value.displayName
+		$Scope= $Value.scope
+		$NoHtml = $Value.description -replace '<[^>]+>',''
+		$Length = $NoHtml.Length-1
+		$AlertDescription= $NoHtml.Substring(1,$Length) 
+			
+			if ($Value.level -contains "Error")
+			{
+				[int]$EventID= 9952
+				[int]$Severity= 1
+			}
+			if ($Value.level -contains "Warning")
+			{
+				[int]$EventID = 9953
+				[int]$Severity = 2
+			}
+        
+			$WaterMarkGUID= $Value.alertId
+
+        $api.LogScriptEvent("[Azure AD Connect Health Sync] ",$EventID,$Severity,"`n`n[Source: $Scope]`n`n[Description:$AlertDescription]`n`n[GUID: $WaterMarkGUID]")
+	}
+}]]></ScriptBody>
+                <Parameters>
+                  <Parameter>
+                    <Name>adTenant</Name>
+                    <Value>$Config/adTenant$</Value>
+                  </Parameter>
+                  <Parameter>
+                    <Name>AADSyncUrl</Name>
+                    <Value>$Config/AADSyncUrl$</Value>
+                  </Parameter>
+                  <Parameter>
+                    <Name>user</Name>
+                    <Value>$RunAs[Name="Azure.ADConnect.Sync.PowerShell.RunAsProfile"]/UserName$</Value>
+                  </Parameter>
+                  <Parameter>
+                    <Name>pass</Name>
+                    <Value>$RunAs[Name="Azure.ADConnect.Sync.PowerShell.RunAsProfile"]/Password$</Value>
+                  </Parameter>
+                </Parameters>
+                <TimeoutSeconds>$Config/TimeoutSeconds$</TimeoutSeconds>
+              </WriteAction>
+            </MemberModules>
+            <Composition>
+              <Node ID="WA" />
+            </Composition>
+          </Composite>
+        </ModuleImplementation>
+        <InputType>System!System.BaseData</InputType>
+      </WriteActionModuleType>
+    </ModuleTypes>
+    <MonitorTypes>
+      <UnitMonitorType ID="DelayedStart.Custom.CheckNTServiceStateMonitorType" Accessibility="Public">
+        <MonitorTypeStates>
+          <MonitorTypeState ID="Running" />
+          <MonitorTypeState ID="NotRunning" />
+        </MonitorTypeStates>
+        <Configuration>
+          <xsd:element name="ComputerName" type="xsd:string" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+          <xsd:element name="ServiceName" type="xsd:string" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+          <xsd:element name="CheckStartupType" minOccurs="0" maxOccurs="1" type="xsd:string" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+        </Configuration>
+        <OverrideableParameters>
+          <OverrideableParameter ID="CheckStartupType" Selector="$Config/CheckStartupType$" ParameterType="string" />
+        </OverrideableParameters>
+        <MonitorImplementation>
+          <MemberModules>
+            <DataSource ID="DS" TypeID="Windows!Microsoft.Windows.Win32ServiceInformationProvider">
+              <ComputerName>$Config/ComputerName$</ComputerName>
+              <ServiceName>$Config/ServiceName$</ServiceName>
+              <Frequency>30</Frequency>
+              <CheckStartupType>$Config/CheckStartupType$</CheckStartupType>
+            </DataSource>
+            <ProbeAction ID="Probe" TypeID="Windows!Microsoft.Windows.Win32ServiceInformationProbe">
+              <ComputerName>$Config/ComputerName$</ComputerName>
+              <ServiceName>$Config/ServiceName$</ServiceName>
+            </ProbeAction>
+            <ConditionDetection ID="ServiceRunning" TypeID="System!System.ExpressionFilter">
+              <Expression>
+                <Or>
+                  <Expression>
+                    <And>
+                      <Expression>
+                        <SimpleExpression>
+                          <ValueExpression>
+                            <Value Type="String">$Config/CheckStartupType$</Value>
+                          </ValueExpression>
+                          <Operator>NotEqual</Operator>
+                          <ValueExpression>
+                            <Value Type="String">false</Value>
+                          </ValueExpression>
+                        </SimpleExpression>
+                      </Expression>
+                      <Expression>
+                        <SimpleExpression>
+                          <ValueExpression>
+                            <XPathQuery Type="Integer">Property[@Name='StartMode']</XPathQuery>
+                          </ValueExpression>
+                          <Operator>NotEqual</Operator>
+                          <ValueExpression>
+                            <Value Type="Integer">2</Value>
+                          </ValueExpression>
+                        </SimpleExpression>
+                      </Expression>
+                    </And>
+                  </Expression>
+                  <Expression>
+                    <SimpleExpression>
+                      <ValueExpression>
+                        <XPathQuery Type="Integer">Property[@Name='State']</XPathQuery>
+                      </ValueExpression>
+                      <Operator>Equal</Operator>
+                      <ValueExpression>
+                        <Value Type="Integer">4</Value>
+                      </ValueExpression>
+                    </SimpleExpression>
+                  </Expression>
+                </Or>
+              </Expression>
+            </ConditionDetection>
+            <ConditionDetection ID="ServiceNotRunning" TypeID="System!System.ExpressionFilter">
+              <Expression>
+                <And>
+                  <Expression>
+                    <Or>
+                      <Expression>
+                        <SimpleExpression>
+                          <ValueExpression>
+                            <XPathQuery Type="Integer">Property[@Name='StartMode']</XPathQuery>
+                          </ValueExpression>
+                          <Operator>Equal</Operator>
+                          <ValueExpression>
+                            <Value Type="Integer">2</Value>
+                          </ValueExpression>
+                        </SimpleExpression>
+                      </Expression>
+                      <Expression>
+                        <And>
+                          <Expression>
+                            <SimpleExpression>
+                              <ValueExpression>
+                                <Value Type="String">$Config/CheckStartupType$</Value>
+                              </ValueExpression>
+                              <Operator>Equal</Operator>
+                              <ValueExpression>
+                                <Value Type="String">false</Value>
+                              </ValueExpression>
+                            </SimpleExpression>
+                          </Expression>
+                          <Expression>
+                            <SimpleExpression>
+                              <ValueExpression>
+                                <XPathQuery Type="Integer">Property[@Name='StartMode']</XPathQuery>
+                              </ValueExpression>
+                              <Operator>NotEqual</Operator>
+                              <ValueExpression>
+                                <Value Type="Integer">2</Value>
+                              </ValueExpression>
+                            </SimpleExpression>
+                          </Expression>
+                        </And>
+                      </Expression>
+                    </Or>
+                  </Expression>
+                  <Expression>
+                    <SimpleExpression>
+                      <ValueExpression>
+                        <XPathQuery Type="Integer">Property[@Name='State']</XPathQuery>
+                      </ValueExpression>
+                      <Operator>NotEqual</Operator>
+                      <ValueExpression>
+                        <Value Type="Integer">4</Value>
+                      </ValueExpression>
+                    </SimpleExpression>
+                  </Expression>
+                </And>
+              </Expression>
+              <SuppressionSettings>
+                <MatchCount>6</MatchCount>
+              </SuppressionSettings>
+            </ConditionDetection>
+          </MemberModules>
+          <RegularDetections>
+            <RegularDetection MonitorTypeStateID="Running">
+              <Node ID="ServiceRunning">
+                <Node ID="DS" />
+              </Node>
+            </RegularDetection>
+            <RegularDetection MonitorTypeStateID="NotRunning">
+              <Node ID="ServiceNotRunning">
+                <Node ID="DS" />
+              </Node>
+            </RegularDetection>
+          </RegularDetections>
+          <OnDemandDetections>
+            <OnDemandDetection MonitorTypeStateID="Running">
+              <Node ID="ServiceRunning">
+                <Node ID="Probe" />
+              </Node>
+            </OnDemandDetection>
+            <OnDemandDetection MonitorTypeStateID="NotRunning">
+              <Node ID="ServiceNotRunning">
+                <Node ID="Probe" />
+              </Node>
+            </OnDemandDetection>
+          </OnDemandDetections>
+        </MonitorImplementation>
+      </UnitMonitorType>
+    </MonitorTypes>
+  </TypeDefinitions>
+  <Monitoring>
+    <Discoveries>
+      <Discovery ID="Azure.AD.Connect.Sync.Discovery" Target="Windows!Microsoft.Windows.Computer" Enabled="true" ConfirmDelivery="false" Remotable="true" Priority="Normal">
+        <Category>Discovery</Category>
+        <DiscoveryTypes />
+        <DataSource ID="DS" TypeID="Windows!Microsoft.Windows.FilteredRegistryDiscoveryProvider">
+          <ComputerName>$Target/Property[Type="Windows!Microsoft.Windows.Computer"]/NetworkName$</ComputerName>
+          <RegistryAttributeDefinitions>
+            <RegistryAttributeDefinition>
+              <AttributeName>IsADSync</AttributeName>
+              <Path>SYSTEM\CurrentControlSet\Services\ADSync</Path>
+              <PathType>0</PathType>
+              <AttributeType>0</AttributeType>
+            </RegistryAttributeDefinition>
+          </RegistryAttributeDefinitions>
+          <Frequency>3600</Frequency>
+          <ClassId>$MPElement[Name="Azure.AD.Connect.Sync.Class"]$</ClassId>
+          <InstanceSettings>
+            <Settings>
+              <Setting>
+                <Name>$MPElement[Name="Windows!Microsoft.Windows.Computer"]/PrincipalName$</Name>
+                <Value>$Target/Property[Type="Windows!Microsoft.Windows.Computer"]/PrincipalName$</Value>
+              </Setting>
+              <Setting>
+                <Name>$MPElement[Name="System!System.Entity"]/DisplayName$</Name>
+                <Value>$Target/Property[Type="Windows!Microsoft.Windows.Computer"]/PrincipalName$</Value>
+              </Setting>
+            </Settings>
+          </InstanceSettings>
+          <Expression>
+            <SimpleExpression>
+              <ValueExpression>
+                <XPathQuery Type="Boolean">Values/IsADSync</XPathQuery>
+              </ValueExpression>
+              <Operator>Equal</Operator>
+              <ValueExpression>
+                <Value Type="Boolean">true</Value>
+              </ValueExpression>
+            </SimpleExpression>
+          </Expression>
+        </DataSource>
+      </Discovery>
+      <Discovery ID="Azure.AD.Connect.Sync.Group.Discovery" Target="Azure.AD.Connect.Sync.Group" Enabled="true" ConfirmDelivery="false" Remotable="true" Priority="Normal">
+        <Category>Discovery</Category>
+        <DiscoveryTypes>
+          <DiscoveryClass TypeID="Azure.AD.Connect.Sync.Class" />
+          <DiscoveryRelationship TypeID="MSIL!Microsoft.SystemCenter.InstanceGroupContainsEntities" />
+        </DiscoveryTypes>
+        <DataSource ID="DS" TypeID="SC!Microsoft.SystemCenter.GroupPopulator">
+          <RuleId>$MPElement$</RuleId>
+          <GroupInstanceId>$MPElement[Name="Azure.AD.Connect.Sync.Group"]$</GroupInstanceId>
+          <MembershipRules>
+            <MembershipRule>
+              <MonitoringClass>$MPElement[Name="Azure.AD.Connect.Sync.Class"]$</MonitoringClass>
+              <RelationshipClass>$MPElement[Name="MSIL!Microsoft.SystemCenter.InstanceGroupContainsEntities"]$</RelationshipClass>
+            </MembershipRule>
+          </MembershipRules>
+        </DataSource>
+      </Discovery>
+    </Discoveries>
+    <Rules>
+      <Rule ID="Azure.AD.Connect.Sync.Rule" Target="SC!Microsoft.SystemCenter.AllManagementServersPool" Enabled="false" ConfirmDelivery="false" Remotable="true" Priority="Normal" DiscardLevel="100">
+        <Category>Custom</Category>
+        <DataSources>
+          <DataSource ID="DS" TypeID="System!System.SimpleScheduler">
+            <IntervalSeconds>900</IntervalSeconds>
+            <SyncTime></SyncTime>
+          </DataSource>
+        </DataSources>
+        <WriteActions>
+          <WriteAction ID="WA" TypeID="Azure.AD.Connect.Sync.WriteActionModuleType">
+            <TimeoutSeconds>300</TimeoutSeconds>
+            <adTenant>OpsConfigCloudTest.onmicrosoft.com</adTenant>
+            <AADSyncUrl>AadSyncService-OpsConfigCloudTest.onmicrosoft.com</AADSyncUrl>
+          </WriteAction>
+        </WriteActions>
+      </Rule>
+      <Rule ID="Azure.AD.Connect.Sync.Critical.Rule" Enabled="true" Target="SC!Microsoft.SystemCenter.AllManagementServersPool" ConfirmDelivery="true" Remotable="true" Priority="Normal" DiscardLevel="100">
+        <Category>Alert</Category>
+        <DataSources>
+          <DataSource ID="DS" TypeID="Windows!Microsoft.Windows.EventProvider">
+            <ComputerName>.</ComputerName>
+            <LogName>Operations Manager</LogName>
+            <Expression>
+              <And>
+                <Expression>
+                  <SimpleExpression>
+                    <ValueExpression>
+                      <XPathQuery Type="UnsignedInteger">EventDisplayNumber</XPathQuery>
+                    </ValueExpression>
+                    <Operator>Equal</Operator>
+                    <ValueExpression>
+                      <Value Type="UnsignedInteger">9952</Value>
+                    </ValueExpression>
+                  </SimpleExpression>
+                </Expression>
+                <Expression>
+                  <SimpleExpression>
+                    <ValueExpression>
+                      <XPathQuery Type="String">PublisherName</XPathQuery>
+                    </ValueExpression>
+                    <Operator>Equal</Operator>
+                    <ValueExpression>
+                      <Value Type="String">Health Service Script</Value>
+                    </ValueExpression>
+                  </SimpleExpression>
+                </Expression>
+              </And>
+            </Expression>
+          </DataSource>
+        </DataSources>
+        <WriteActions>
+          <WriteAction ID="Alert" TypeID="Health!System.Health.GenerateAlert">
+            <Priority>1</Priority>
+            <Severity>2</Severity>
+            <AlertName />
+            <AlertDescription />
+            <AlertOwner />
+            <AlertMessageId>$MPElement[Name="Azure.AD.Connect.Sync.Critical.Rule.AlertMessage"]$</AlertMessageId>
+            <AlertParameters>
+              <AlertParameter1>$Data[Default='']/EventDescription$</AlertParameter1>
+            </AlertParameters>
+            <Suppression />
+            <Custom1 />
+            <Custom2 />
+            <Custom3 />
+            <Custom4 />
+            <Custom5 />
+            <Custom6 />
+            <Custom7 />
+            <Custom8 />
+            <Custom9 />
+            <Custom10 />
+          </WriteAction>
+        </WriteActions>
+      </Rule>
+      <Rule ID="Azure.AD.Connect.Sync.Warning.Rule" Enabled="true" Target="SC!Microsoft.SystemCenter.AllManagementServersPool" ConfirmDelivery="true" Remotable="true" Priority="Normal" DiscardLevel="100">
+        <Category>Alert</Category>
+        <DataSources>
+          <DataSource ID="DS" TypeID="Windows!Microsoft.Windows.EventProvider">
+            <ComputerName>.</ComputerName>
+            <LogName>Operations Manager</LogName>
+            <Expression>
+              <And>
+                <Expression>
+                  <SimpleExpression>
+                    <ValueExpression>
+                      <XPathQuery Type="UnsignedInteger">EventDisplayNumber</XPathQuery>
+                    </ValueExpression>
+                    <Operator>Equal</Operator>
+                    <ValueExpression>
+                      <Value Type="UnsignedInteger">9953</Value>
+                    </ValueExpression>
+                  </SimpleExpression>
+                </Expression>
+                <Expression>
+                  <SimpleExpression>
+                    <ValueExpression>
+                      <XPathQuery Type="String">PublisherName</XPathQuery>
+                    </ValueExpression>
+                    <Operator>Equal</Operator>
+                    <ValueExpression>
+                      <Value Type="String">Health Service Script</Value>
+                    </ValueExpression>
+                  </SimpleExpression>
+                </Expression>
+              </And>
+            </Expression>
+          </DataSource>
+        </DataSources>
+        <WriteActions>
+          <WriteAction ID="Alert" TypeID="Health!System.Health.GenerateAlert">
+            <Priority>1</Priority>
+            <Severity>1</Severity>
+            <AlertName />
+            <AlertDescription />
+            <AlertOwner />
+            <AlertMessageId>$MPElement[Name="Azure.AD.Connect.Sync.Warning.Rule.AlertMessage"]$</AlertMessageId>
+            <AlertParameters>
+              <AlertParameter1>$Data[Default='']/EventDescription$</AlertParameter1>
+            </AlertParameters>
+            <Suppression />
+            <Custom1 />
+            <Custom2 />
+            <Custom3 />
+            <Custom4 />
+            <Custom5 />
+            <Custom6 />
+            <Custom7 />
+            <Custom8 />
+            <Custom9 />
+            <Custom10 />
+          </WriteAction>
+        </WriteActions>
+      </Rule>
+    </Rules>
+    <Monitors>
+      <UnitMonitor ID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncInsights.Service.Monitor" Accessibility="Public" Enabled="true" Target="Azure.AD.Connect.Sync.Class" ParentMonitorID="Health!System.Health.AvailabilityState" Remotable="true" Priority="Normal" TypeID="DelayedStart.Custom.CheckNTServiceStateMonitorType" ConfirmDelivery="false">
+        <Category>AvailabilityHealth</Category>
+        <AlertSettings AlertMessage="Azure.AD.Connect.Custom.AzureADConnectHealthSyncInsights.Service.Monitor.Alert.Message">
+          <AlertOnState>Error</AlertOnState>
+          <AutoResolve>true</AutoResolve>
+          <AlertPriority>Normal</AlertPriority>
+          <AlertSeverity>Error</AlertSeverity>
+          <AlertParameters>
+            <AlertParameter1>$Data/Context/Property[@Name='Name']$</AlertParameter1>
+            <AlertParameter2>$Target/Host/Property[Type="Windows!Microsoft.Windows.Computer"]/PrincipalName$</AlertParameter2>
+          </AlertParameters>
+        </AlertSettings>
+        <OperationalStates>
+          <OperationalState ID="Running" MonitorTypeStateID="Running" HealthState="Success" />
+          <OperationalState ID="NotRunning" MonitorTypeStateID="NotRunning" HealthState="Error" />
+        </OperationalStates>
+        <Configuration>
+          <ComputerName />
+          <ServiceName>AzureADConnectHealthSyncInsights</ServiceName>
+          <CheckStartupType>false</CheckStartupType>
+        </Configuration>
+      </UnitMonitor>
+      <UnitMonitor ID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncMonitor.Service.Monitor" Accessibility="Public" Enabled="true" Target="Azure.AD.Connect.Sync.Class" ParentMonitorID="Health!System.Health.AvailabilityState" Remotable="true" Priority="Normal" TypeID="DelayedStart.Custom.CheckNTServiceStateMonitorType" ConfirmDelivery="false">
+        <Category>AvailabilityHealth</Category>
+        <AlertSettings AlertMessage="Azure.AD.Connect.Custom.AzureADConnectHealthSyncMonitor.Service.Monitor.Alert.Message">
+          <AlertOnState>Error</AlertOnState>
+          <AutoResolve>true</AutoResolve>
+          <AlertPriority>Normal</AlertPriority>
+          <AlertSeverity>Error</AlertSeverity>
+          <AlertParameters>
+            <AlertParameter1>$Data/Context/Property[@Name='Name']$</AlertParameter1>
+            <AlertParameter2>$Target/Host/Property[Type="Windows!Microsoft.Windows.Computer"]/PrincipalName$</AlertParameter2>
+          </AlertParameters>
+        </AlertSettings>
+        <OperationalStates>
+          <OperationalState ID="Running" MonitorTypeStateID="Running" HealthState="Success" />
+          <OperationalState ID="NotRunning" MonitorTypeStateID="NotRunning" HealthState="Error" />
+        </OperationalStates>
+        <Configuration>
+          <ComputerName />
+          <ServiceName>AzureADConnectHealthSyncMonitor</ServiceName>
+          <CheckStartupType>false</CheckStartupType>
+        </Configuration>
+      </UnitMonitor>
+      <UnitMonitor ID="Azure.AD.Connect.Custom.ADSync.Service.Monitor" Accessibility="Public" Enabled="true" Target="Azure.AD.Connect.Sync.Class" ParentMonitorID="Health!System.Health.AvailabilityState" Remotable="true" Priority="Normal" TypeID="Windows!Microsoft.Windows.CheckNTServiceStateMonitorType" ConfirmDelivery="false">
+        <Category>AvailabilityHealth</Category>
+        <AlertSettings AlertMessage="Azure.AD.Connect.Custom.ADSync.Service.Monitor.Alert.Message">
+          <AlertOnState>Error</AlertOnState>
+          <AutoResolve>true</AutoResolve>
+          <AlertPriority>Normal</AlertPriority>
+          <AlertSeverity>Error</AlertSeverity>
+          <AlertParameters>
+            <AlertParameter1>$Data/Context/Property[@Name='Name']$</AlertParameter1>
+            <AlertParameter2>$Target/Host/Property[Type="Windows!Microsoft.Windows.Computer"]/PrincipalName$</AlertParameter2>
+          </AlertParameters>
+        </AlertSettings>
+        <OperationalStates>
+          <OperationalState ID="Running" MonitorTypeStateID="Running" HealthState="Success" />
+          <OperationalState ID="NotRunning" MonitorTypeStateID="NotRunning" HealthState="Error" />
+        </OperationalStates>
+        <Configuration>
+          <ComputerName />
+          <ServiceName>ADSync</ServiceName>
+          <CheckStartupType />
+        </Configuration>
+      </UnitMonitor>
+    </Monitors>
+  </Monitoring>
+  <Presentation>
+    <StringResources>
+      <StringResource ID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncInsights.Service.Monitor.Alert.Message" />
+      <StringResource ID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncMonitor.Service.Monitor.Alert.Message" />
+      <StringResource ID="Azure.AD.Connect.Custom.ADSync.Service.Monitor.Alert.Message" />
+      <StringResource ID="Azure.AD.Connect.Sync.Critical.Rule.AlertMessage" />
+      <StringResource ID="Azure.AD.Connect.Sync.Warning.Rule.AlertMessage" />
+    </StringResources>
+  </Presentation>
+  <LanguagePacks>
+    <LanguagePack ID="ENU" IsDefault="true">
+      <DisplayStrings>
+        <DisplayString ElementID="DelayedStart.Custom.CheckNTServiceStateMonitorType">
+          <Name>Basic Service Monitor</Name>
+          <Description>A two state monitor that uses WMI to check the state of the specified Windows service.  The monitor will be unhealthy when the service is not running and has been set to start automatically.</Description>
+        </DisplayString>
+        <DisplayString ElementID="DelayedStart.Custom.CheckNTServiceStateMonitorType" SubElementID="Running">
+          <Name>Service is running</Name>
+          <Description>Service state monitor will be in this state if the service is running</Description>
+        </DisplayString>
+        <DisplayString ElementID="DelayedStart.Custom.CheckNTServiceStateMonitorType" SubElementID="NotRunning">
+          <Name>Service is not running</Name>
+          <Description>Service state monitor will be in this state if the service is not running</Description>
+        </DisplayString>
+        <DisplayString ElementID="DelayedStart.Custom.CheckNTServiceStateMonitorType" SubElementID="CheckStartupType">
+          <Name>Alert only if service startup type is automatic</Name>
+          <Description>This may only be set to 'true' or 'false'.  If set to 'false', then alerts will be triggered no matter what the startup type is set to.  Default is 'true'.</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.WriteActionModuleType">
+          <Name>Azure AD Connect Sync Write Action Module Type</Name>
+          <Description>Azure AD Connect Sync Write Action Module Type</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Rule">
+          <Name>Azure AD Connect Sync Rule</Name>
+          <Description>Azure AD Connect Sync Rule</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Critical.Rule">
+          <Name>Azure AD Connect Sync Health - Critical Alerts</Name>
+          <Description />
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Critical.Rule.AlertMessage">
+          <Name>Azure AD Connect Sync - OpsConfig - Critical Alert</Name>
+          <Description>{0}</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Critical.Rule" SubElementID="Alert">
+          <Name>Alert</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Critical.Rule" SubElementID="DS">
+          <Name>DS</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Warning.Rule">
+          <Name>Azure AD Connect Sync Health - Warning Alert</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Warning.Rule.AlertMessage">
+          <Name>Azure AD Connect Sync - OpsConfig - Warning Alerts</Name>
+          <Description>{0}</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Warning.Rule" SubElementID="Alert">
+          <Name>Alert</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Warning.Rule" SubElementID="DS">
+          <Name>DS</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncInsights.Service.Monitor">
+          <Name>Azure.AD.Connect.Custom AzureADConnectHealthSyncInsights Service Monitor</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncInsights.Service.Monitor" SubElementID="Running">
+          <Name>Running</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncInsights.Service.Monitor" SubElementID="NotRunning">
+          <Name>Not Running</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncInsights.Service.Monitor.Alert.Message">
+          <Name>Azure.AD.Connect.Custom AzureADConnectHealthSyncInsights service is not running or is not detected on this system</Name>
+          <Description>
+            Service {0} is not running on {1}.
+
+            This alert can also be caused by not having this service installed on a server where the Azure AD Sync Service has been detected.
+
+            The Azure AD Connect Agent/Services are required to properly monitor Azure AD Connect Sync:
+            https://docs.microsoft.com/en-us/azure/active-directory/connect-health/active-directory-aadconnect-health#download-and-install-azure-ad-connect-health-agent
+          </Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncMonitor.Service.Monitor">
+          <Name>Azure.AD.Connect.Custom AzureADConnectHealthSyncMonitor Service Monitor</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncMonitor.Service.Monitor" SubElementID="Running">
+          <Name>Running</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncMonitor.Service.Monitor" SubElementID="NotRunning">
+          <Name>Not Running</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.AzureADConnectHealthSyncMonitor.Service.Monitor.Alert.Message">
+          <Name>Azure.AD.Connect.Custom AzureADConnectHealthSyncMonitor service is not running or is not detected on this system</Name>
+          <Description>
+            Service {0} is not running on {1}
+
+            This alert can also be caused by not having this service installed on a server where the Azure AD Sync Service has been detected.
+
+            The Azure AD Connect Agent/Services are required to properly monitor Azure AD Connect Sync:
+            https://docs.microsoft.com/en-us/azure/active-directory/connect-health/active-directory-aadconnect-health#download-and-install-azure-ad-connect-health-agent
+          </Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Class">
+          <Name>Azure AD Connect Sync Class</Name>
+          <Description></Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Group">
+          <Name>Azure AD Connect Sync Group</Name>
+          <Description></Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Discovery">
+          <Name>Azure AD Connect Discovery</Name>
+          <Description>Azure AD Connect Discovery</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Group.Discovery">
+          <Name>Azure AD Connect Group Discovery</Name>
+          <Description>Azure AD Connect Group Discovery</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.ADSync.Service.Monitor">
+          <Name>Azure.AD.Connect.Custom ADSync Service Monitor</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.ADSync.Service.Monitor" SubElementID="Running">
+          <Name>Running</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.ADSync.Service.Monitor" SubElementID="NotRunning">
+          <Name>Not Running</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Custom.ADSync.Service.Monitor.Alert.Message">
+          <Name>Azure.AD.Connect.Custom ADSync service is not running</Name>
+          <Description>Service {0} is not running on {1}</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.ADConnect.Sync.PowerShell.RunAsProfile">
+          <Name>Azure ADConnect Sync Custom PowerShell RunAsProfile</Name>
+          <Description>Azure.ADConnect.Sync.PowerShell.RunAsProfile</Description>
+        </DisplayString>
+      </DisplayStrings>
+      <KnowledgeArticles></KnowledgeArticles>
+    </LanguagePack>
+  </LanguagePacks>
+</ManagementPack>
