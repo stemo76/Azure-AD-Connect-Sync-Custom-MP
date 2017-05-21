@@ -1,0 +1,59 @@
+﻿<ManagementPackFragment SchemaVersion="2.0" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <LanguagePacks>
+    <LanguagePack ID="ENU" IsDefault="true">
+      <DisplayStrings>
+        <DisplayString ElementID="DelayedStart.Custom.CheckNTServiceStateMonitorType">
+          <Name>Basic Service Monitor</Name>
+          <Description>A two state monitor that uses WMI to check the state of the specified Windows service.  The monitor will be unhealthy when the service is not running and has been set to start automatically.</Description>
+        </DisplayString>
+        <DisplayString ElementID="DelayedStart.Custom.CheckNTServiceStateMonitorType" SubElementID="Running">
+          <Name>Service is running</Name>
+          <Description>Service state monitor will be in this state if the service is running</Description>
+        </DisplayString>
+        <DisplayString ElementID="DelayedStart.Custom.CheckNTServiceStateMonitorType" SubElementID="NotRunning">
+          <Name>Service is not running</Name>
+          <Description>Service state monitor will be in this state if the service is not running</Description>
+        </DisplayString>
+        <DisplayString ElementID="DelayedStart.Custom.CheckNTServiceStateMonitorType" SubElementID="CheckStartupType">
+          <Name>Alert only if service startup type is automatic</Name>
+          <Description>This may only be set to 'true' or 'false'.  If set to 'false', then alerts will be triggered no matter what the startup type is set to.  Default is 'true'.</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.WriteActionModuleType">
+          <Name>Azure AD Connect Sync Write Action Module Type</Name>
+          <Description>Azure AD Connect Sync Write Action Module Type</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Rule">
+          <Name>Azure AD Connect Sync Rule</Name>
+          <Description>Azure AD Connect Sync Rule</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Critical.Rule">
+          <Name>Azure AD Connect Sync Health - Critical Alerts</Name>
+          <Description />
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Critical.Rule.AlertMessage">
+          <Name>Azure AD Connect Sync - OpsConfig - Critical Alert</Name>
+          <Description>{0}</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Critical.Rule" SubElementID="Alert">
+          <Name>Alert</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Critical.Rule" SubElementID="DS">
+          <Name>DS</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Warning.Rule">
+          <Name>Azure AD Connect Sync Health - Warning Alert</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Warning.Rule.AlertMessage">
+          <Name>Azure AD Connect Sync - OpsConfig - Warning Alerts</Name>
+          <Description>{0}</Description>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Warning.Rule" SubElementID="Alert">
+          <Name>Alert</Name>
+        </DisplayString>
+        <DisplayString ElementID="Azure.AD.Connect.Sync.Warning.Rule" SubElementID="DS">
+          <Name>DS</Name>
+        </DisplayString>
+      </DisplayStrings>
+    </LanguagePack>
+  </LanguagePacks>
+</ManagementPackFragment>

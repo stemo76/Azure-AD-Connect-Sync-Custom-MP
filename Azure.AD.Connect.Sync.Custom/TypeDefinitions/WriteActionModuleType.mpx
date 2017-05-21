@@ -1,0 +1,51 @@
+﻿<ManagementPackFragment SchemaVersion="2.0" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <TypeDefinitions>
+    <ModuleTypes>
+      <WriteActionModuleType ID="Azure.AD.Connect.Sync.WriteActionModuleType" Accessibility="Internal" Batching="true">
+        <Configuration>
+          <xsd:element minOccurs="1" name="TimeoutSeconds" type="xsd:integer" />
+          <xsd:element type="xsd:string" name="adTenant" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+          <xsd:element type="xsd:string" name="AADSyncUrl" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+        </Configuration>
+        <OverrideableParameters>
+          <OverrideableParameter ID="TimeoutSeconds" Selector="$Config/TimeoutSeconds$" ParameterType="int" />
+          <OverrideableParameter ID="adTenant" Selector="$Config/adTenant$" ParameterType="string" />
+          <OverrideableParameter ID="AADSyncUrl" Selector="$Config/AADSyncUrl$" ParameterType="string" />
+        </OverrideableParameters>
+        <ModuleImplementation>
+          <Composite>
+            <MemberModules>
+              <WriteAction ID="WA" TypeID="Windows!Microsoft.Windows.PowerShellWriteAction">
+                <ScriptName>AzureADConnectSync.ps1</ScriptName>
+                <ScriptBody>$IncludeFileContent/Scripts/AzureADConnectSync.ps1$</ScriptBody>
+                <Parameters>
+                  <Parameter>
+                    <Name>adTenant</Name>
+                    <Value>$Config/adTenant$</Value>
+                  </Parameter>
+                  <Parameter>
+                    <Name>AADSyncUrl</Name>
+                    <Value>$Config/AADSyncUrl$</Value>
+                  </Parameter>
+                  <Parameter>
+                    <Name>user</Name>
+                    <Value>$RunAs[Name="Azure.ADConnect.Sync.PowerShell.RunAsProfile"]/UserName$</Value>
+                  </Parameter>
+                  <Parameter>
+                    <Name>pass</Name>
+                    <Value>$RunAs[Name="Azure.ADConnect.Sync.PowerShell.RunAsProfile"]/Password$</Value>
+                  </Parameter>
+                </Parameters>
+                <TimeoutSeconds>$Config/TimeoutSeconds$</TimeoutSeconds>
+              </WriteAction>
+            </MemberModules>
+            <Composition>
+              <Node ID="WA" />
+            </Composition>
+          </Composite>
+        </ModuleImplementation>
+        <InputType>System!System.BaseData</InputType>
+      </WriteActionModuleType>
+    </ModuleTypes>
+  </TypeDefinitions>
+</ManagementPackFragment>

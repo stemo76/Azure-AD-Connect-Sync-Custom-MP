@@ -1,0 +1,8 @@
+﻿<ManagementPackFragment SchemaVersion="2.0" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Presentation>
+  <StringResources>
+    <StringResource ID="Azure.AD.Connect.Sync.Critical.Rule.AlertMessage" />
+    <StringResource ID="Azure.AD.Connect.Sync.Warning.Rule.AlertMessage" />
+  </StringResources>
+  </Presentation>
+</ManagementPackFragment>
