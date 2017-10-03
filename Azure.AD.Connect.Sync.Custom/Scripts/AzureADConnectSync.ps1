@@ -1,4 +1,10 @@
 ﻿Param($adTenant, $AADSyncURL, $user, $pass)
+
+#used for error logging
+$ScriptName = "ADConnect.ps1"
+
+#Clears errors for error handling that was added at the end.
+$Error.Clear()
 $api = new-object -comObject "MOM.ScriptAPI"
 
 $SCOMPowerShellKey = "HKLM:\SOFTWARE\Microsoft\System Center Operations Manager\12\Setup\Powershell\V2"
@@ -41,8 +47,8 @@ Foreach ($RValue in $ResolvedValues)
 	$ResolvedGuids+=$GUID
 }
 
-
-$SCOMActiveAlerts= Get-SCOMAlert -Criteria "Name LIKE '%Azure AD Connect Sync - OpsConfig -%' AND ResolutionState = 0 AND IsMonitorAlert = 0"
+# updated to include all unclosed alerts
+$SCOMActiveAlerts= Get-SCOMAlert -Criteria "Name LIKE '%Azure AD Connect Sync - OpsConfig -%' AND ResolutionState <> 255 AND IsMonitorAlert = 0"
 
 $ActiveSCOMAlertGUIDS=@()
 
@@ -90,3 +96,11 @@ Foreach ($Value in $ActiveAlertValues)
         $api.LogScriptEvent("[Azure AD Connect Health Sync] ",$EventID,$Severity,"`n`n[Source: $Scope]`n`n[Description:$AlertDescription]`n`n[GUID: $WaterMarkGUID]")
 	}
 }
+#Logging Errors 
+If ($Error.Count -ne 0)
+    {
+        [int]$EventID= 9951
+	[int]$Severity= 1
+        $AlertDescription = "Script failure: $scriptname; $error"
+	$api.LogScriptEvent("[Azure AD Connect Health Sync] ",$EventID,$Severity,"`n`n[Description:$AlertDescription]")
+    }
